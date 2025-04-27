@@ -34,9 +34,21 @@ fn handle_connection(mut stream: TcpStream) {
     // 200 OK Pattern
     let get = b"GET / HTTP/1.1\r\n";
 
+    // echo Pattern
+    let echo = b"GET /echo/";
+
     // Write the Response
     if buffer.starts_with(get) {
         stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes()).unwrap();
+    } else if buffer.starts_with(echo) {
+        let req_str: Vec<&[u8]> = buffer.split(|&b| b == b' ').collect();
+        let uri = req_str[1];
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+            uri.len(),
+            String::from_utf8_lossy(&uri[6..])
+        );
+        stream.write(response.as_bytes()).unwrap();
     } else {
         stream
             .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
