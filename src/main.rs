@@ -45,7 +45,7 @@ fn handle_connection(mut stream: TcpStream) {
         let uri = req_str[1];
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-            uri.len(),
+            uri[6..].len(),
             String::from_utf8_lossy(&uri[6..])
         );
         stream.write(response.as_bytes()).unwrap();
