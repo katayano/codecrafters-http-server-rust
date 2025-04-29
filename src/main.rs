@@ -80,11 +80,10 @@ fn handle_connection(mut stream: TcpStream) {
     println!("accepted new connection");
 
     // Set directory for response files
-    let args = env::args().collect::<Vec<_>>();
-    let res_file_dir = if args[1] == "--directory" {
-        Some(args[2].clone())
-    } else {
-        None
+    let mut args = env::args().skip(1);
+    let res_file_dir = match args.next() {
+        Some(dir_option) if dir_option == "--directory" => args.next(),
+        _ => None,
     };
 
     // Read the Request
