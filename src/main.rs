@@ -3,6 +3,29 @@ use std::io::prelude::*;
 use std::net::TcpListener;
 use std::net::TcpStream;
 
+struct Reqeuest {
+    method: String,
+    uri: String,
+    version: String,
+}
+
+impl Reqeuest {
+    fn new(request: &[u8]) -> Self {
+        let request_str = String::from_utf8_lossy(request);
+        let request_info = request_str.split_whitespace().collect::<Vec<&str>>();
+
+        let method = request_info[0].to_string();
+        let uri = request_info[1].to_string();
+        let version = request_info[2].to_string();
+
+        Reqeuest {
+            method,
+            uri,
+            version,
+        }
+    }
+}
+
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
@@ -31,27 +54,28 @@ fn handle_connection(mut stream: TcpStream) {
     stream.read(&mut buffer).unwrap();
     println!("Request: {}", String::from_utf8_lossy(&buffer[..]));
 
-    // 200 OK Pattern
-    let get = b"GET / HTTP/1.1\r\n";
-
-    // echo Pattern
-    let echo = b"GET /echo/";
+    let request = Reqeuest::new(&buffer);
 
     // Write the Response
-    if buffer.starts_with(get) {
-        stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes()).unwrap();
-    } else if buffer.starts_with(echo) {
-        let req_str: Vec<&[u8]> = buffer.split(|&b| b == b' ').collect();
-        let uri = req_str[1];
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-            uri[6..].len(),
-            String::from_utf8_lossy(&uri[6..])
-        );
-        stream.write(response.as_bytes()).unwrap();
-    } else {
-        stream
-            .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
-            .unwrap();
+    let path = request.uri.as_str();
+    match path {
+        "/" => {
+            stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes()).unwrap();
+        }
+        _ if path.starts_with("/echo/") => {
+            let mut iter = path.split("/");
+            let sub_path = iter.nth(2).unwrap();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                sub_path.len(),
+                sub_path
+            );
+            stream.write(response.as_bytes()).unwrap();
+        }
+        _ => {
+            stream
+                .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                .unwrap();
+        }
     }
 }
