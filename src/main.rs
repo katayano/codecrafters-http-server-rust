@@ -5,6 +5,9 @@ use std::net::TcpListener;
 use std::net::TcpStream;
 use std::thread;
 
+mod shared;
+use shared::thread_pool::ThreadPool;
+
 struct Reqeuest {
     method: String,
     uri: String,
@@ -58,11 +61,12 @@ fn main() {
     // Uncomment this block to pass the first stage
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
+    let pool = ThreadPool::new(5);
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(|| {
+                pool.execute(|| {
                     handle_connection(stream);
                 });
             }
