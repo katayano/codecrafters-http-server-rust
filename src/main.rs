@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 #[allow(unused_imports)]
+use std::collections::HashMap;
 use std::io::prelude::*;
 use std::net::TcpListener;
 use std::net::TcpStream;
+use std::thread;
 
 struct Reqeuest {
     method: String,
@@ -61,7 +62,9 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                handle_connection(stream);
+                thread::spawn(|| {
+                    handle_connection(stream);
+                });
             }
             Err(e) => {
                 println!("error: {}", e);
