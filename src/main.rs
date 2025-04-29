@@ -1,9 +1,10 @@
 #[allow(unused_imports)]
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::io::prelude::*;
 use std::net::TcpListener;
 use std::net::TcpStream;
-use std::thread;
 
 mod shared;
 use shared::thread_pool::ThreadPool;
@@ -58,8 +59,6 @@ fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    // Uncomment this block to pass the first stage
-
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
     let pool = ThreadPool::new(5);
 
@@ -79,6 +78,14 @@ fn main() {
 
 fn handle_connection(mut stream: TcpStream) {
     println!("accepted new connection");
+
+    // Set directory for response files
+    let args = env::args().collect::<Vec<_>>();
+    let res_file_dir = if args[1] == "--directory" {
+        Some(args[2].clone())
+    } else {
+        None
+    };
 
     // Read the Request
     let mut buffer = [0; 1024];
@@ -117,6 +124,35 @@ fn handle_connection(mut stream: TcpStream) {
             );
             stream.write(response.as_bytes()).unwrap();
         }
+        _ if path.starts_with("/files") => match res_file_dir {
+            Some(dir) => {
+                // Get the filename and contents of file
+                let mut iter = path.split("/");
+                let file_name = iter.nth(2).unwrap();
+                let file_path = format!("{}/{}", dir, file_name);
+                let file_content = fs::read(file_path);
+                match file_content {
+                    Ok(content) => {
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                            content.len(),
+                            String::from_utf8_lossy(&content)
+                        );
+                        stream.write(response.as_bytes()).unwrap();
+                    }
+                    Err(_) => {
+                        stream
+                            .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                            .unwrap();
+                    }
+                }
+            }
+            None => {
+                stream
+                    .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                    .unwrap();
+            }
+        },
         _ => {
             stream
                 .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
