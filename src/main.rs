@@ -110,14 +110,36 @@ fn handle_connection(mut stream: TcpStream) {
             stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes()).unwrap();
         }
         _ if path.starts_with("/echo/") => {
+            // Get the subpath after /echo/
             let mut iter = path.split("/");
             let sub_path = iter.nth(2).unwrap();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                sub_path.len(),
-                sub_path
-            );
-            stream.write(response.as_bytes()).unwrap();
+
+            // Get the Accept-Encoding header
+            let accept_encoding = request
+                .headers
+                .iter()
+                .find(|header| header.contains_key("Accept-Encoding"))
+                .and_then(|header| header.get("Accept-Encoding").cloned())
+                .unwrap_or("".to_string());
+
+            // Check if the Accept-Encoding header contains gzip
+            if accept_encoding.contains("gzip") {
+                // If it does, return the response with gzip encoding
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
+                    sub_path.len(),
+                    sub_path
+                );
+                stream.write(response.as_bytes()).unwrap();
+            } else {
+                // If it doesn't, return the response without gzip encoding
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    sub_path.len(),
+                    sub_path
+                );
+                stream.write(response.as_bytes()).unwrap();
+            }
         }
         _ if path.starts_with("/user-agent") => {
             let user_agent = request
