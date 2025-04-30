@@ -115,7 +115,7 @@ fn handle_connection(mut stream: TcpStream) {
             let sub_path = iter.nth(2).unwrap();
 
             // Get the Accept-Encoding header
-            let accept_encoding = request
+            let accept_encodings = request
                 .headers
                 .iter()
                 .find(|header| header.contains_key("Accept-Encoding"))
@@ -123,7 +123,10 @@ fn handle_connection(mut stream: TcpStream) {
                 .unwrap_or("".to_string());
 
             // Check if the Accept-Encoding header contains gzip
-            if accept_encoding.contains("gzip") {
+            if accept_encodings
+                .split(", ")
+                .any(|encoding| encoding == "gzip")
+            {
                 // If it does, return the response with gzip encoding
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
