@@ -168,14 +168,26 @@ fn handle_connection(mut stream: TcpStream) {
                                 .and_then(|header| header.get("Content-Type").cloned())
                                 .unwrap_or("".to_string());
 
+                            // Check if the content type is application/octet-stream
                             if content_type == "application/octet-stream" {
+                                // Get the Content-Length header of the request
+                                let content_length = request
+                                    .headers
+                                    .iter()
+                                    .find(|header| header.contains_key("Content-Length"))
+                                    .and_then(|header| header.get("Content-Length").cloned())
+                                    .unwrap_or("0".to_string())
+                                    .parse::<usize>()
+                                    .unwrap_or(0);
+
                                 // Get the filename
                                 let mut iter = path.split("/");
                                 let file_name = iter.nth(2).unwrap();
                                 let file_path = format!("{}/{}", dir, file_name);
                                 //Create the file and write the contents
                                 let mut file = fs::File::create(file_path).unwrap();
-                                file.write_all(request.body.as_bytes()).unwrap();
+                                file.write_all(&request.body.as_bytes()[..content_length])
+                                    .unwrap();
                                 stream
                                     .write("HTTP/1.1 201 Created\r\n\r\n".as_bytes())
                                     .unwrap();
