@@ -10,11 +10,16 @@ mod shared;
 use shared::thread_pool::ThreadPool;
 
 struct Reqeuest {
-    method: String,
+    method: RequestMethod,
     uri: String,
     version: String,
     headers: Vec<HashMap<String, String>>,
     body: String,
+}
+
+enum RequestMethod {
+    GET,
+    POST,
 }
 
 impl Reqeuest {
@@ -29,7 +34,12 @@ impl Reqeuest {
         // Request line
         let line = lines.next().unwrap();
         let mut request_line = line.split_whitespace();
-        let method = request_line.next().unwrap().to_string();
+        let method = request_line.next().unwrap();
+        let method = match method {
+            "GET" => RequestMethod::GET,
+            "POST" => RequestMethod::POST,
+            _ => panic!("Unsupported request method"),
+        };
         let uri = request_line.next().unwrap().to_string();
         let version = request_line.next().unwrap().to_string();
 
@@ -123,35 +133,68 @@ fn handle_connection(mut stream: TcpStream) {
             );
             stream.write(response.as_bytes()).unwrap();
         }
-        _ if path.starts_with("/files") => match res_file_dir {
-            Some(dir) => {
-                // Get the filename and contents of file
-                let mut iter = path.split("/");
-                let file_name = iter.nth(2).unwrap();
-                let file_path = format!("{}/{}", dir, file_name);
-                let file_content = fs::read(file_path);
-                match file_content {
-                    Ok(content) => {
-                        let response = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
-                            content.len(),
-                            String::from_utf8_lossy(&content)
-                        );
-                        stream.write(response.as_bytes()).unwrap();
-                    }
-                    Err(_) => {
-                        stream
-                            .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
-                            .unwrap();
+        _ if path.starts_with("/files") => {
+            match res_file_dir {
+                // Check if the directory is provided
+                Some(dir) => {
+                    match request.method {
+                        RequestMethod::GET => {
+                            // Get the filename and contents of file
+                            let mut iter = path.split("/");
+                            let file_name = iter.nth(2).unwrap();
+                            let file_path = format!("{}/{}", dir, file_name);
+                            let file_content = fs::read(file_path);
+                            match file_content {
+                                Ok(content) => {
+                                    let response = format!(
+                                                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                                                content.len(),
+                                                String::from_utf8_lossy(&content)
+                                            );
+                                    stream.write(response.as_bytes()).unwrap();
+                                }
+                                Err(_) => {
+                                    stream
+                                        .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                                        .unwrap();
+                                }
+                            }
+                        }
+                        RequestMethod::POST => {
+                            let content_type = request
+                                .headers
+                                .iter()
+                                .find(|header| header.contains_key("Content-Type"))
+                                .and_then(|header| header.get("Content-Type").cloned())
+                                .unwrap_or("".to_string());
+
+                            if content_type == "application/octet-stream" {
+                                // Get the filename
+                                let mut iter = path.split("/");
+                                let file_name = iter.nth(2).unwrap();
+                                let file_path = format!("{}/{}", dir, file_name);
+                                //Create the file and write the contents
+                                let mut file = fs::File::create(file_path).unwrap();
+                                file.write_all(request.body.as_bytes()).unwrap();
+                                stream
+                                    .write("HTTP/1.1 201 Created\r\n\r\n".as_bytes())
+                                    .unwrap();
+                            } else {
+                                // If the content type is not application/octet-stream, return 415
+                                stream
+                                    .write("HTTP/1.1 415 Unsupported Media Type\r\n\r\n".as_bytes())
+                                    .unwrap();
+                            }
+                        }
                     }
                 }
+                None => {
+                    stream
+                        .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                        .unwrap();
+                }
             }
-            None => {
-                stream
-                    .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
-                    .unwrap();
-            }
-        },
+        }
         _ => {
             stream
                 .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
