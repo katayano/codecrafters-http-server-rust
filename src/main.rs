@@ -40,7 +40,7 @@ impl Reqeuest {
         let method = match method {
             "GET" => RequestMethod::GET,
             "POST" => RequestMethod::POST,
-            _ => panic!("Unsupported request method"),
+            _ => panic!("Unsupported request method: {}", method),
         };
         let uri = request_line.next().unwrap().to_string();
         let version = request_line.next().unwrap().to_string();
@@ -98,11 +98,16 @@ fn handle_connection(stream: TcpStream) {
         _ => None,
     };
 
-    // Read the Request
-    let request = read_request(&stream);
+    loop {
+        // Read the Request
+        let request = read_request(&stream);
 
-    // Create the Response
-    create_response(stream, request, res_file_dir);
+        // Create the Response
+        let finished_connection = create_response(&stream, request, &res_file_dir);
+        if finished_connection {
+            break;
+        }
+    }
 }
 
 fn read_request(mut stream: &TcpStream) -> Reqeuest {
@@ -113,7 +118,11 @@ fn read_request(mut stream: &TcpStream) -> Reqeuest {
     Reqeuest::new(&buffer)
 }
 
-fn create_response(mut stream: TcpStream, request: Reqeuest, res_file_dir: Option<String>) {
+fn create_response(
+    mut stream: &TcpStream,
+    request: Reqeuest,
+    res_file_dir: &Option<String>,
+) -> bool {
     let path = request.uri.as_str();
     match path {
         "/" => {
@@ -253,6 +262,14 @@ fn create_response(mut stream: TcpStream, request: Reqeuest, res_file_dir: Optio
                 .unwrap();
         }
     }
+    let finished_connection = request
+        .headers
+        .iter()
+        .find(|header| header.contains_key("Connection"))
+        .and_then(|header| header.get("Connection").cloned())
+        .unwrap_or("".to_string())
+        == "close";
+    finished_connection
 }
 
 #[cfg(test)]
@@ -372,7 +389,7 @@ mod tests {
         let _ = thread::spawn(move || {
             if let Ok(stream) = listener.accept() {
                 let request = read_request(&stream.0);
-                create_response(stream.0, request, Option::Some(String::from("/tmp")));
+                create_response(&stream.0, request, &Option::Some(String::from("/tmp")));
             }
         });
 
@@ -406,7 +423,7 @@ mod tests {
         let _ = thread::spawn(move || {
             if let Ok(stream) = listener.accept() {
                 let request = read_request(&stream.0);
-                create_response(stream.0, request, Option::Some(String::from("/tmp")));
+                create_response(&stream.0, request, &Option::Some(String::from("/tmp")));
             }
         });
 
@@ -431,7 +448,7 @@ mod tests {
         let _ = thread::spawn(move || {
             if let Ok(stream) = listener.accept() {
                 let request = read_request(&stream.0);
-                create_response(stream.0, request, Option::Some(String::from("/tmp")));
+                create_response(&stream.0, request, &Option::Some(String::from("/tmp")));
             }
         });
 
