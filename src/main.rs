@@ -262,6 +262,7 @@ fn create_response(
                 .unwrap();
         }
     }
+    // Check if the connection should be closed
     let finished_connection = request
         .headers
         .iter()
@@ -560,6 +561,25 @@ mod tests {
             response_str,
             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 3\r\n\r\nabc"
         );
+    }
+
+    #[test]
+    fn test_handle_connection_persistent() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                let request = read_request(&stream.0);
+                assert!(create_response(&stream.0, request, &Option::None));
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /echo/abc HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
     }
 
     fn start_local_server() -> TcpListener {
