@@ -477,10 +477,14 @@ mod tests {
         let read_size = client_stream.read(&mut response).unwrap();
         let response_str = String::from_utf8_lossy(&response[..read_size]);
 
-        assert_eq!(
-            response_str,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: 3\r\n\r\nabc"
-        );
+        assert!(response_str.starts_with("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: 23\r\n\r\n"));
+
+        // gzip encoding
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all("abc".as_bytes()).unwrap();
+        let compress_data = encoder.finish().unwrap();
+        // Check if the response ends with the compressed data
+        assert!(response[..read_size].ends_with(&compress_data));
     }
 
     #[test]
@@ -504,10 +508,14 @@ mod tests {
         let read_size = client_stream.read(&mut response).unwrap();
         let response_str = String::from_utf8_lossy(&response[..read_size]);
 
-        assert_eq!(
-            response_str,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: 3\r\n\r\nabc"
-        );
+        assert!(response_str.starts_with("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: 23\r\n\r\n"));
+
+        // gzip encoding
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all("abc".as_bytes()).unwrap();
+        let compress_data = encoder.finish().unwrap();
+        // Check if the response ends with the compressed data
+        assert!(response[..read_size].ends_with(&compress_data));
     }
 
     #[test]
