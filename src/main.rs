@@ -144,11 +144,11 @@ fn create_response(mut stream: TcpStream, request: Reqeuest, res_file_dir: Optio
 
                 // If it does, return the response with gzip encoding
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
                     compress_data.len(),
-                    String::from_utf8_lossy(&compress_data)
                 );
                 stream.write(response.as_bytes()).unwrap();
+                stream.write(&compress_data).unwrap();
             } else {
                 // If it doesn't, return the response without gzip encoding
                 let response = format!(
