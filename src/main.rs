@@ -123,10 +123,22 @@ fn create_response(
     request: Reqeuest,
     res_file_dir: &Option<String>,
 ) -> bool {
+    // Check if the connection should be closed
+    let finished_connection = request
+        .headers
+        .iter()
+        .find(|header| header.contains_key("Connection"))
+        .and_then(|header| header.get("Connection").cloned())
+        .unwrap_or("".to_string())
+        == "close";
     let path = request.uri.as_str();
     match path {
         "/" => {
-            stream.write("HTTP/1.1 200 OK\r\n\r\n".as_bytes()).unwrap();
+            stream.write("HTTP/1.1 200 OK".as_bytes()).unwrap();
+            if finished_connection {
+                stream.write("\r\nConnection: close".as_bytes()).unwrap();
+            }
+            stream.write("\r\n\r\n".as_bytes()).unwrap();
         }
         _ if path.starts_with("/echo/") => {
             // Get the subpath after /echo/
@@ -152,19 +164,34 @@ fn create_response(
                 let compress_data = encoder.finish().unwrap();
 
                 // If it does, return the response with gzip encoding
-                let response = format!(
+                let response = if finished_connection {
+                    format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    compress_data.len()
+                    )
+                } else {
+                    format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
-                    compress_data.len(),
-                );
+                    compress_data.len()
+                    )
+                };
                 stream.write(response.as_bytes()).unwrap();
                 stream.write(&compress_data).unwrap();
             } else {
                 // If it doesn't, return the response without gzip encoding
-                let response = format!(
+                let response = if finished_connection {
+                    format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    sub_path.len(),
+                    sub_path
+                    )
+                } else {
+                    format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
                     sub_path.len(),
                     sub_path
-                );
+                    )
+                };
                 stream.write(response.as_bytes()).unwrap();
             }
         }
@@ -175,11 +202,19 @@ fn create_response(
                 .find(|header| header.contains_key("User-Agent"))
                 .and_then(|header| header.get("User-Agent").cloned())
                 .unwrap_or("".to_string());
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                user_agent.len(),
-                user_agent
-            );
+            let response = if finished_connection {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    user_agent.len(),
+                    user_agent
+                )
+            } else {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    user_agent.len(),
+                    user_agent
+                )
+            };
             stream.write(response.as_bytes()).unwrap();
         }
         _ if path.starts_with("/files") => {
@@ -195,17 +230,31 @@ fn create_response(
                             let file_content = fs::read(file_path);
                             match file_content {
                                 Ok(content) => {
-                                    let response = format!(
+                                    let response = if finished_connection {
+                                        format!(
+                                                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                                content.len(),
+                                                String::from_utf8_lossy(&content)
+                                            )
+                                    } else {
+                                        format!(
                                                 "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
                                                 content.len(),
                                                 String::from_utf8_lossy(&content)
-                                            );
+                                            )
+                                    };
                                     stream.write(response.as_bytes()).unwrap();
                                 }
                                 Err(_) => {
-                                    stream
-                                        .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
-                                        .unwrap();
+                                    if finished_connection {
+                                        stream
+                                            .write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".as_bytes())
+                                            .unwrap();
+                                    } else {
+                                        stream
+                                            .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                                            .unwrap();
+                                    }
                                 }
                             }
                         }
@@ -237,39 +286,66 @@ fn create_response(
                                 let mut file = fs::File::create(file_path).unwrap();
                                 file.write_all(&request.body.as_bytes()[..content_length])
                                     .unwrap();
-                                stream
-                                    .write("HTTP/1.1 201 Created\r\n\r\n".as_bytes())
-                                    .unwrap();
+
+                                if finished_connection {
+                                    stream
+                                        .write(
+                                            "HTTP/1.1 201 Created\r\nConnection: close\r\n\r\n"
+                                                .as_bytes(),
+                                        )
+                                        .unwrap();
+                                } else {
+                                    stream
+                                        .write("HTTP/1.1 201 Created\r\n\r\n".as_bytes())
+                                        .unwrap();
+                                }
                             } else {
                                 // If the content type is not application/octet-stream, return 415
-                                stream
-                                    .write("HTTP/1.1 415 Unsupported Media Type\r\n\r\n".as_bytes())
-                                    .unwrap();
+                                if finished_connection {
+                                    stream
+                                        .write(
+                                            "HTTP/1.1 415 Unsupported Media Type\r\nConnection: close\r\n\r\n"
+                                                .as_bytes(),
+                                        )
+                                        .unwrap();
+                                } else {
+                                    stream
+                                        .write(
+                                            "HTTP/1.1 415 Unsupported Media Type\r\n\r\n"
+                                                .as_bytes(),
+                                        )
+                                        .unwrap();
+                                }
                             }
                         }
                     }
                 }
                 None => {
-                    stream
-                        .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
-                        .unwrap();
+                    if finished_connection {
+                        stream
+                            .write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".as_bytes())
+                            .unwrap();
+                    } else {
+                        stream
+                            .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                            .unwrap();
+                    }
                 }
             }
         }
         _ => {
-            stream
-                .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
-                .unwrap();
+            if finished_connection {
+                stream
+                    .write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".as_bytes())
+                    .unwrap();
+            } else {
+                stream
+                    .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
+                    .unwrap();
+            }
         }
     }
-    // Check if the connection should be closed
-    let finished_connection = request
-        .headers
-        .iter()
-        .find(|header| header.contains_key("Connection"))
-        .and_then(|header| header.get("Connection").cloned())
-        .unwrap_or("".to_string())
-        == "close";
+
     finished_connection
 }
 
@@ -580,6 +656,15 @@ mod tests {
         let mut client_stream = TcpStream::connect(addr).unwrap();
         let request = "GET /echo/abc HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
         client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(
+            response_str,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc"
+        );
     }
 
     fn start_local_server() -> TcpListener {
