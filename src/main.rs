@@ -86,7 +86,7 @@ fn main() {
     }
 }
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(stream: TcpStream) {
     println!("accepted new connection");
 
     // Set directory for response files
@@ -97,13 +97,21 @@ fn handle_connection(mut stream: TcpStream) {
     };
 
     // Read the Request
+    let request = read_request(&stream);
+
+    // Create the Response
+    create_response(stream, request, res_file_dir);
+}
+
+fn read_request(mut stream: &TcpStream) -> Reqeuest {
     let mut buffer = [0; 1024];
     stream.read(&mut buffer).unwrap();
     println!("Request: {}", String::from_utf8_lossy(&buffer[..]));
 
-    let request = Reqeuest::new(&buffer);
+    Reqeuest::new(&buffer)
+}
 
-    // Write the Response
+fn create_response(mut stream: TcpStream, request: Reqeuest, res_file_dir: Option<String>) {
     let path = request.uri.as_str();
     match path {
         "/" => {
@@ -237,5 +245,293 @@ fn handle_connection(mut stream: TcpStream) {
                 .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
                 .unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{thread, vec};
+
+    #[test]
+    fn test_handle_connection_success() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                handle_connection(stream.0);
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET / HTTP/1.1\r\nHost: localhost:4221\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(response_str, "HTTP/1.1 200 OK\r\n\r\n");
+    }
+
+    #[test]
+    fn test_handle_connection_404() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                handle_connection(stream.0);
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /abcdefg HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(response_str, "HTTP/1.1 404 Not Found\r\n\r\n");
+    }
+
+    #[test]
+    fn test_handle_connection_echo() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                handle_connection(stream.0);
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /echo/abc HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(
+            response_str,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 3\r\n\r\nabc"
+        );
+    }
+
+    #[test]
+    fn test_handle_connection_user_agent() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                handle_connection(stream.0);
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request =
+            "GET /user-agent HTTP/1.1\r\nHost: localhost\r\nUser-Agent: foobar/1.2.3\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(
+            response_str,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nfoobar/1.2.3"
+        );
+    }
+
+    #[test]
+    fn test_handle_connection_files() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                let request = read_request(&stream.0);
+                create_response(stream.0, request, Option::Some(String::from("/tmp")));
+            }
+        });
+
+        // Create a file in the directory
+        let mut file = fs::File::create("/tmp/foo").unwrap();
+        file.write_all(&"Hello, World!".as_bytes()[..13]).unwrap();
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /files/foo HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+        // Clean up the file
+        fs::remove_file("/tmp/foo").unwrap();
+
+        assert_eq!(
+            response_str,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 13\r\n\r\nHello, World!"
+        );
+    }
+
+    #[test]
+    fn test_handle_connection_files_404() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                let request = read_request(&stream.0);
+                create_response(stream.0, request, Option::Some(String::from("/tmp")));
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /files/non_existant_file HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(response_str, "HTTP/1.1 404 Not Found\r\n\r\n");
+    }
+
+    #[test]
+    fn test_handle_connection_read_body() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                let request = read_request(&stream.0);
+                create_response(stream.0, request, Option::Some(String::from("/tmp")));
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "POST /files/file_123 HTTP/1.1\r\nHost: localhost\r\n\
+                                        Content-Type: application/octet-stream\r\n\
+                                        Content-Length: 5\r\n\r\n12345";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(response_str, "HTTP/1.1 201 Created\r\n\r\n");
+
+        // Check if the file was created
+        let file_content = fs::read("/tmp/file_123").unwrap();
+        assert_eq!(file_content, vec![49, 50, 51, 52, 53]);
+
+        // Clean up the file
+        fs::remove_file("/tmp/file_123").unwrap();
+    }
+
+    #[test]
+    fn test_handle_connection_accept_encoding() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                handle_connection(stream.0);
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /echo/abc HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(
+            response_str,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: 3\r\n\r\nabc"
+        );
+    }
+
+    #[test]
+    fn test_handle_connection_multiple_encoding() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                handle_connection(stream.0);
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /echo/abc HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: invalid-encoding-1, gzip, invalid-encoding-2\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(
+            response_str,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: 3\r\n\r\nabc"
+        );
+    }
+
+    #[test]
+    fn test_handle_connection_invalid_encoding() {
+        let listener = start_local_server();
+        let addr = listener.local_addr().unwrap();
+
+        // Run Http Server
+        let _ = thread::spawn(move || {
+            if let Ok(stream) = listener.accept() {
+                handle_connection(stream.0);
+            }
+        });
+
+        // Create a test request (Client)
+        let mut client_stream = TcpStream::connect(addr).unwrap();
+        let request = "GET /echo/abc HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: invalid-encoding-1, invalid-encoding-2\r\n\r\n";
+        client_stream.write(request.as_bytes()).unwrap();
+        // Read the response
+        let mut response = [0; 1024];
+        let read_size = client_stream.read(&mut response).unwrap();
+        let response_str = String::from_utf8_lossy(&response[..read_size]);
+
+        assert_eq!(
+            response_str,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 3\r\n\r\nabc"
+        );
+    }
+
+    fn start_local_server() -> TcpListener {
+        // Port 0 means the OS will assign a free port
+        TcpListener::bind("127.0.0.1:0").unwrap()
     }
 }
