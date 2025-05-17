@@ -1,10 +1,12 @@
 #[allow(unused_imports)]
-use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::io::prelude::*;
-use std::net::TcpListener;
-use std::net::TcpStream;
+use std::{
+    collections::HashMap,
+    env, fs,
+    io::prelude::*,
+    net::{TcpListener, TcpStream},
+};
+
+use flate2::{write::GzEncoder, Compression};
 
 mod shared;
 use shared::thread_pool::ThreadPool;
@@ -135,11 +137,16 @@ fn create_response(mut stream: TcpStream, request: Reqeuest, res_file_dir: Optio
                 .split(", ")
                 .any(|encoding| encoding == "gzip")
             {
+                // gzip encoding
+                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                encoder.write_all(sub_path.as_bytes()).unwrap();
+                let compress_data = encoder.finish().unwrap();
+
                 // If it does, return the response with gzip encoding
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
-                    sub_path.len(),
-                    sub_path
+                    compress_data.len(),
+                    String::from_utf8_lossy(&compress_data)
                 );
                 stream.write(response.as_bytes()).unwrap();
             } else {
