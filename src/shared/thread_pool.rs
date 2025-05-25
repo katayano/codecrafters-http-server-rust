@@ -1,3 +1,5 @@
+//! This programs is created by following the Rust book
+//! https://doc.rust-jp.rs/book-ja/ch20-02-multithreaded.html
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
